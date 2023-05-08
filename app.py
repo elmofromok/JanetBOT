@@ -12,24 +12,24 @@ intents.message_content = True
 
 # Discord
 bot = commands.Bot(command_prefix='@janet', intents=intents)
-DISCORD_TOKEN = 'MTEwMzI4ODg4MzU5NDEzMzYwNA.G9md9H.IAsyF3XWemRUUZHYV4oDinkvFjACM2_36NSebs'
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 # OpenAI
-openai.api_key = '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'
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 
 
 
-async def fetch_chat_gpt_response(prompt):
-    response = openai.Completion.create(
-        engine="text-davinci-002",
-        prompt=prompt,
+async def fetch_chat_gpt_response(messages):
+    completion = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=messages,
         max_tokens=150,
         n=1,
         stop=None,
         temperature=0.5,
     )
-    message_content = response.choices[0].text.strip()
+    message_content = completion.choices[0].message.content
     return message_content
 
 @bot.event
@@ -44,11 +44,13 @@ async def on_message(message):
 
     if bot.user in message.mentions:  # Check if the bot was mentioned
         print(f'bot was mentioned!')
-        print(f'message: {message}')
+        print(f'message: {message.content}')
         print(f'message received, stripping name!')
+        print(f'Bot id : {bot.user.id}')
         content = message.content.replace(f'<@!{bot.user.id}>', '').strip()  # Remove the mention from the message
         print(f'content: {content}')
-        prompt = f'User: {content}\nJanet:'
+        # prompt = f'User: {content}\nJanet:'
+        prompt = [{"role": "user", "content": content}]
         print(f'prompt: {prompt}')
         response = await fetch_chat_gpt_response(prompt)
         print(f'response: {response}')
