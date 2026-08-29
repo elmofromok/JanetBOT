@@ -34,8 +34,9 @@ mentioning her.
 _Avoid_: invoke, trigger, ping, wake
 
 **Present**:
-The state Janet is in after being summoned, during which she answers messages
-in that channel without being summoned again.
+The state Janet is in after a Resident summons her, during which she answers
+that Resident in that channel without being summoned again. Held for one
+Resident per channel: a Summon by anyone else replaces it.
 _Avoid_: active, awake, listening, session
 
 **Dismiss**:
@@ -44,8 +45,8 @@ void.
 _Avoid_: sleep, deactivate, timeout, close
 
 **Exchange**:
-The run of messages in one channel from a Summon to the Dismiss that ends it.
-The unit Janet reads when answering.
+The run of messages between Janet and one Resident in one channel, from a
+Summon to the Dismiss that ends it. The unit Janet reads when answering.
 _Avoid_: session, thread, conversation, context
 
 ## What she does
