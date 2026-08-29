@@ -1,7 +1,7 @@
 import os
 import discord
 from discord.ext import commands
-import openai
+from openai import AsyncOpenAI
 from discord import Intents
 
 
@@ -15,19 +15,21 @@ bot = commands.Bot(command_prefix='@janet', intents=intents)
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 # OpenAI
-openai.api_key = os.getenv("OPENAI_API_KEY")
+openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 
 
 async def fetch_chat_gpt_response(messages):
-    completion = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+    # gpt-5.6-luna is a reasoning model: it rejects temperature, and its
+    # reasoning tokens come out of the same budget as the reply. Effort is off
+    # so the whole budget is spent on what the Resident actually reads, and so
+    # a Summon stays as fast as the model was picked to be.
+    completion = await openai_client.chat.completions.create(
+        model="gpt-5.6-luna",
         messages=messages,
-        max_tokens=150,
-        n=1,
-        stop=None,
-        temperature=0.5,
+        max_completion_tokens=1024,
+        reasoning_effort="none",
     )
     message_content = completion.choices[0].message.content
     return message_content
