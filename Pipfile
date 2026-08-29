@@ -4,9 +4,8 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-discord.py = "*"
+"discord.py" = "*"
 openai = "*"
-gunicorn = "*"
 
 
 [dev-packages]
