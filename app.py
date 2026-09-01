@@ -1,38 +1,43 @@
+"""Discord wiring. Ask presence what to do, then do it."""
+
 import os
+from datetime import datetime, timezone
+
 import discord
 from discord.ext import commands
-from openai import AsyncOpenAI
-from discord import Intents
 
+import completion
+import persona
+import presence
 
 intents = discord.Intents.default()
 intents.messages = True
 intents.guilds = True
 intents.message_content = True
 
-# Discord
 bot = commands.Bot(command_prefix='@janet', intents=intents)
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
-# OpenAI
-openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# The channel's current record, or nothing if Janet is not Present there.
+# `presence.decide` is pure, so the records are held here and written back.
+presences: dict[int, presence.Presence] = {}
 
 
-
-
-async def fetch_chat_gpt_response(messages):
-    # gpt-5.6-luna is a reasoning model: it rejects temperature, and its
-    # reasoning tokens come out of the same budget as the reply. Effort is off
-    # so the whole budget is spent on what the Resident actually reads, and so
-    # a Summon stays as fast as the model was picked to be.
-    completion = await openai_client.chat.completions.create(
-        model="gpt-5.6-luna",
-        messages=messages,
-        max_completion_tokens=1024,
-        reasoning_effort="none",
+def read_message(message: discord.Message) -> presence.IncomingMessage:
+    """Turn a Discord message into the facts presence works with."""
+    # `<@!ID>` is the legacy nickname form Discord no longer sends, so this
+    # strips nothing in practice. #4 fixes it to `<@ID>`.
+    text = message.content.replace(f'<@!{bot.user.id}>', '').strip()
+    return presence.IncomingMessage(
+        resident_id=message.author.id,
+        from_bot=message.author.bot,
+        from_janet=message.author == bot.user,
+        channel_id=message.channel.id,
+        text=text,
+        mentions_janet=bot.user in message.mentions,
+        in_server=message.guild is not None,
     )
-    message_content = completion.choices[0].message.content
-    return message_content
+
 
 @bot.event
 async def on_ready():
@@ -41,22 +46,23 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
-    if message.author == bot.user:
-        return
+    channel_id = message.channel.id
+    decision, record = presence.decide(
+        presences.get(channel_id),
+        read_message(message),
+        datetime.now(timezone.utc),
+    )
 
-    if bot.user in message.mentions:  # Check if the bot was mentioned
-        print(f'bot was mentioned!')
-        print(f'message: {message.content}')
-        print(f'message received, stripping name!')
-        print(f'Bot id : {bot.user.id}')
-        content = message.content.replace(f'<@!{bot.user.id}>', '').strip()  # Remove the mention from the message
-        print(f'content: {content}')
-        # prompt = f'User: {content}\nJanet:'
-        prompt = [{"role": "user", "content": content}]
-        print(f'prompt: {prompt}')
-        response = await fetch_chat_gpt_response(prompt)
-        print(f'response: {response}')
+    if record is None:
+        presences.pop(channel_id, None)
+    else:
+        presences[channel_id] = record
+
+    # presence.Goodbye is unreachable until #4 dismisses her, and gets its
+    # branch here when #6 has written the line.
+    if isinstance(decision, presence.Reply):
+        response = await completion.complete(persona.build_payload(decision.exchange))
         await message.channel.send(response)
 
-bot.run(DISCORD_TOKEN)
 
+bot.run(DISCORD_TOKEN)
