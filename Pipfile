@@ -9,6 +9,12 @@ openai = "~=3.6"
 
 
 [dev-packages]
+# Pipfile.lock is not regenerated for this and its hash no longer matches.
+# That mismatch is the signal that makes pipenv re-lock, so leave it: a
+# matching hash over an empty [develop] would tell pipenv there is nothing
+# to install and pytest would go missing without a word. The fix is a real
+# `pipenv lock` from a machine with pipenv and Python 3.11. Nothing reads
+# the lock today; the deploy installs requirements.txt.
 pytest = "*"
 
 [requires]
