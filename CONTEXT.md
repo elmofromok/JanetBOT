@@ -86,3 +86,19 @@ The durable facts Janet holds about one Resident, surviving any Exchange.
 Called a File after the residents' files in the show. Never plain "File",
 which collides with filesystem files.
 _Avoid_: profile, user data, memory, record
+
+## How she is run
+
+The Operator's two controls. They differ by lifetime, which is why only one is
+a command (ADR 0004).
+
+**Off Switch**:
+The control that stops Janet answering anything at all, and drops every
+Exchange in progress. An emergency, held in memory, so a restart brings her
+back on.
+_Avoid_: disable, mute, pause, maintenance mode
+
+**Opt-Out**:
+The channels Janet never listens in, named by channel id. Standing policy
+rather than an emergency, so it outlives a restart and changes by redeploy.
+_Avoid_: blocklist, blacklist, ignore list, allowlist
