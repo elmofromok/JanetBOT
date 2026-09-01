@@ -28,11 +28,7 @@ GOODBYE = "Okay! Bye!"
 
 
 def build_payload(exchange: Sequence[ExchangeMessage]) -> list[dict[str, str]]:
-    """Build the message list for a completion from the Exchange so far.
-
-    Takes a sequence even though the Exchange holds a single message today, so
-    that Exchange Recall (#5) is a change to what is passed in, not to this.
-    """
+    """Build the message list for a completion from the Exchange so far."""
     payload: list[dict[str, str]] = []
     if SYSTEM_PROMPT:
         payload.append({"role": "system", "content": SYSTEM_PROMPT})
@@ -42,7 +38,9 @@ def build_payload(exchange: Sequence[ExchangeMessage]) -> list[dict[str, str]]:
 
 
 def _as_chat_message(message: ExchangeMessage) -> dict[str, str]:
-    return {
-        "role": "assistant" if message.from_janet else "user",
-        "content": message.text,
-    }
+    if message.speaker is None:
+        return {"role": "assistant", "content": message.text}
+    # Named, so she can tell the summoner from a bystander and answer people
+    # by name. A chat payload has one "user" and the Exchange has a channel
+    # full of them.
+    return {"role": "user", "content": f"{message.speaker}: {message.text}"}

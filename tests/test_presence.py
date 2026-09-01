@@ -5,8 +5,8 @@ frozen clock or async machinery: a case is a record, the facts of a message
 and a time in, a decision and the next record out. Times are passed, never
 slept through.
 
-The cases come from the acceptance criteria in #4, not from reading the
-module. A test derived from the implementation agrees with its bugs.
+The cases come from the acceptance criteria in #4 and #5, not from reading
+the module. A test derived from the implementation agrees with its bugs.
 """
 
 from __future__ import annotations
@@ -23,6 +23,8 @@ ALICE = 1
 BOB = 2
 SOME_BOT = 99
 
+DISPLAY_NAMES = {ALICE: "Alice", BOB: "Bob", SOME_BOT: "Doorman"}
+
 CHANNEL = 100
 OTHER_CHANNEL = 200
 
@@ -36,6 +38,23 @@ DISMISSALS = [
     "thank you janet",
     "that's all janet",
 ]
+
+
+def unchanged_but_for_recall(
+    record: presence.Presence | None,
+    before: presence.Presence,
+) -> bool:
+    """Still her Exchange, with the same summoner and the same clocks.
+
+    Everything a message she overhears may not touch. What it may touch is
+    her recall, which is why this compares the rest field by field.
+    """
+    return record is not None and (
+        record.resident_id,
+        record.began,
+        record.idle_from,
+        record.last_spoke,
+    ) == (before.resident_id, before.began, before.idle_from, before.last_spoke)
 
 
 def at(seconds: float) -> datetime:
@@ -55,6 +74,7 @@ def said(
 ) -> presence.IncomingMessage:
     return presence.IncomingMessage(
         resident_id=resident,
+        speaker=DISPLAY_NAMES[resident],
         from_bot=from_bot,
         from_janet=from_janet,
         channel_id=channel,
@@ -150,7 +170,7 @@ def test_another_residents_ordinary_message_is_ignored():
     decision, record = presence.decide(present, said("unrelated chatter", BOB), at(10))
 
     assert isinstance(decision, presence.Nothing)
-    assert record == present
+    assert unchanged_but_for_recall(record, present)
 
 
 def test_another_residents_summon_takes_her_over():
@@ -164,7 +184,7 @@ def test_another_residents_summon_takes_her_over():
     # Nothing is said about the Exchange it replaced, and nothing of it is
     # carried into the new one.
     assert record.exchange == (
-        presence.ExchangeMessage(from_janet=False, text="janet over here"),
+        presence.ExchangeMessage(speaker="Bob", text="janet over here"),
     )
 
 
@@ -175,7 +195,7 @@ def test_the_resident_she_was_taken_from_is_no_longer_answered():
     decision, record = presence.decide(taken, said("i was still talking", ALICE), at(20))
 
     assert isinstance(decision, presence.Nothing)
-    assert record == taken
+    assert unchanged_but_for_recall(record, taken)
 
 
 # --- Dismissal ---------------------------------------------------------
@@ -218,7 +238,7 @@ def test_a_dismissal_from_anyone_but_the_summoner_does_nothing_at_all(phrase):
     decision, record = presence.decide(present, said(phrase, BOB), at(10))
 
     assert isinstance(decision, presence.Nothing)
-    assert record == present
+    assert unchanged_but_for_recall(record, present)
 
 
 @pytest.mark.parametrize("phrase", DISMISSALS)
@@ -306,7 +326,7 @@ def test_a_dropped_reply_is_never_delivered_late():
     assert isinstance(decision, presence.Reply)
     # She answers what was just said, not the message the cooldown ate.
     assert decision.exchange[-1] == presence.ExchangeMessage(
-        from_janet=False, text="asked later"
+        speaker="Alice", text="asked later"
     )
 
 
@@ -407,3 +427,152 @@ def test_deciding_reaches_no_further_than_the_standard_library():
     """The reason these tests need no Discord client and no API key."""
     assert "discord" not in sys.modules
     assert "openai" not in sys.modules
+
+
+# --- Exchange Recall ---------------------------------------------------
+
+
+def spoken(exchange) -> list[tuple[str | None, str]]:
+    """An Exchange as (speaker, text) pairs, which is what the payload needs."""
+    return [(message.speaker, message.text) for message in exchange]
+
+
+def test_the_summon_is_the_first_thing_she_recalls():
+    present = summoned(ALICE, "janet what is the capital of peru")
+
+    assert spoken(present.exchange) == [("Alice", "janet what is the capital of peru")]
+
+
+def test_a_follow_up_is_answered_with_the_exchange_so_far():
+    present = summoned(ALICE, "janet what is the capital of peru")
+    present = presence.janet_said(present, present.began, "Lima!")
+
+    decision, record = presence.decide(present, said("how big is it"), at(10))
+
+    assert isinstance(decision, presence.Reply)
+    assert spoken(decision.exchange) == [
+        ("Alice", "janet what is the capital of peru"),
+        (None, "Lima!"),
+        ("Alice", "how big is it"),
+    ]
+
+
+def test_her_own_replies_are_recalled_as_hers():
+    present = summoned()
+
+    record = presence.janet_said(present, present.began, "Hi there!")
+
+    assert record is not None
+    assert record.exchange[-1] == presence.ExchangeMessage(speaker=None, text="Hi there!")
+
+
+def test_a_reply_that_outlived_its_exchange_is_not_recalled():
+    """She was dismissed, or taken over, while the model was still thinking."""
+    present = summoned(ALICE)
+    _, taken = presence.decide(present, said("janet over here", BOB), at(10))
+
+    record = presence.janet_said(taken, present.began, "answering Alice")
+
+    assert record == taken
+    assert presence.janet_said(None, present.began, "answering Alice") is None
+
+
+def test_a_bystanders_message_is_recalled_though_she_never_answers_it():
+    present = summoned(ALICE, "janet hello")
+
+    _, record = presence.decide(present, said("i think she means the river", BOB), at(10))
+
+    assert record is not None
+    assert spoken(record.exchange) == [
+        ("Alice", "janet hello"),
+        ("Bob", "i think she means the river"),
+    ]
+
+
+@pytest.mark.parametrize("phrase", DISMISSALS)
+def test_a_dismissal_from_a_bystander_is_recalled_like_any_other_message(phrase):
+    present = summoned(ALICE, "janet hello")
+
+    _, record = presence.decide(present, said(phrase, BOB), at(10))
+
+    assert record is not None
+    assert spoken(record.exchange) == [("Alice", "janet hello"), ("Bob", phrase)]
+
+
+def test_a_message_the_cooldown_suppressed_is_recalled():
+    present = summoned(ALICE, "janet hello")
+
+    _, dropped = presence.decide(present, said("and another thing"), at(1))
+    decision, _ = presence.decide(dropped, said("asked later"), at(5))
+
+    assert isinstance(decision, presence.Reply)
+    assert spoken(decision.exchange) == [
+        ("Alice", "janet hello"),
+        ("Alice", "and another thing"),
+        ("Alice", "asked later"),
+    ]
+
+
+def test_nothing_said_before_the_summon_is_recalled():
+    record = None
+    for text in ["what is the capital of peru", "no idea", "ask someone else"]:
+        _, record = presence.decide(record, said(text, BOB), T0)
+    assert record is None
+
+    decision, record = presence.decide(record, said("janet, do you know", ALICE), at(1))
+
+    assert isinstance(decision, presence.Reply)
+    assert spoken(decision.exchange) == [("Alice", "janet, do you know")]
+
+
+def test_a_goodbye_takes_her_recall_with_it():
+    present = summoned(ALICE, "janet hello")
+    _, gone = presence.decide(present, said("bye janet"), at(10))
+    assert gone is None
+
+    decision, record = presence.decide(gone, said("janet are you back"), at(20))
+
+    assert isinstance(decision, presence.Reply)
+    assert spoken(decision.exchange) == [("Alice", "janet are you back")]
+
+
+def test_the_silence_takes_her_recall_with_it():
+    present = summoned(ALICE, "janet hello")
+    _, gone = presence.decide(present, said("still there"), at(121))
+    assert gone is None
+
+    decision, record = presence.decide(gone, said("janet are you back"), at(122))
+
+    assert isinstance(decision, presence.Reply)
+    assert spoken(decision.exchange) == [("Alice", "janet are you back")]
+
+
+def test_a_takeover_carries_nothing_of_the_exchange_it_replaced():
+    present = summoned(ALICE, "janet hello")
+    present = presence.janet_said(present, present.began, "Hi there!")
+    _, present = presence.decide(present, said("one more thing", ALICE), at(5))
+
+    decision, record = presence.decide(present, said("janet over here", BOB), at(10))
+
+    assert isinstance(decision, presence.Reply)
+    assert spoken(decision.exchange) == [("Bob", "janet over here")]
+
+
+def test_a_bot_is_never_recalled():
+    present = summoned(ALICE, "janet hello")
+
+    _, record = presence.decide(present, said("beep", SOME_BOT, from_bot=True), at(10))
+
+    assert record is not None
+    assert spoken(record.exchange) == [("Alice", "janet hello")]
+
+
+def test_recall_holds_the_most_recent_forty_messages_in_order():
+    present = summoned(ALICE, "janet hello")
+    for number in range(60):
+        _, present = presence.decide(present, said(f"message {number}", BOB), at(10))
+
+    assert present is not None
+    assert len(present.exchange) == 40
+    assert spoken(present.exchange) == [("Bob", f"message {number}") for number in range(20, 60)]
+

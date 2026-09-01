@@ -45,8 +45,11 @@ void.
 _Avoid_: sleep, deactivate, timeout, close
 
 **Exchange**:
-The run of messages between Janet and one Resident in one channel, from a
-Summon to the Dismiss that ends it. The unit Janet reads when answering.
+The run of messages in one channel from a Summon to the Dismiss that ends it,
+and the unit Janet reads when answering. She answers only the Resident who
+summoned her, and hears everyone: a bystander's message joins the Exchange
+without being replied to, which is ADR 0001's commitment that she reads the
+channel while Present.
 _Avoid_: session, thread, conversation, context
 
 ## What she does
@@ -68,7 +71,9 @@ _Avoid_: image, asset, attachment, output
 Three distinct things, deliberately not called "memory".
 
 **Exchange Recall**:
-What Janet knows of the current Exchange. Ends when she is dismissed.
+What Janet knows of the current Exchange: every message in it, her own replies
+included, held to the most recent forty. Ends when she is dismissed, and
+nothing of it reaches the next Exchange.
 _Avoid_: short-term memory, context
 
 **Server Knowledge**:
