@@ -1,12 +1,12 @@
 """Discord wiring. Ask presence what to do, then do it."""
 
-import os
 from datetime import datetime, timezone
 
 import discord
 from discord.ext import commands
 
 import completion
+import config
 import persona
 import presence
 
@@ -16,7 +16,6 @@ intents.guilds = True
 intents.message_content = True
 
 bot = commands.Bot(command_prefix='@janet', intents=intents)
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 # The channel's current record, or nothing if Janet is not Present there.
 # `presence.decide` is pure, so the records are held here and written back.
@@ -86,4 +85,4 @@ async def on_message(message):
         await message.channel.send(persona.GOODBYE)
 
 
-bot.run(DISCORD_TOKEN)
+bot.run(config.DISCORD_TOKEN)

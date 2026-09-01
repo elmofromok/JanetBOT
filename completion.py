@@ -7,15 +7,16 @@ the next churn of that kind lands in one file.
 
 from __future__ import annotations
 
-import os
 from typing import cast
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
+import config
+
 MODEL = "gpt-5.6-luna"
 
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
 
 
 async def complete(payload: list[dict[str, str]]) -> str | None:
