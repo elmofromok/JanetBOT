@@ -22,6 +22,10 @@ SYSTEM_PROMPT = ""
 # description of a voice does not.
 EXAMPLES: tuple[ExchangeMessage, ...] = ()
 
+# What she says on being dismissed, and the one line she has that the model
+# never sees. Placeholder wording: #6 owns how she actually sounds.
+GOODBYE = "Okay! Bye!"
+
 
 def build_payload(exchange: Sequence[ExchangeMessage]) -> list[dict[str, str]]:
     """Build the message list for a completion from the Exchange so far.

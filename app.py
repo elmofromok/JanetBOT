@@ -25,9 +25,13 @@ presences: dict[int, presence.Presence] = {}
 
 def read_message(message: discord.Message) -> presence.IncomingMessage:
     """Turn a Discord message into the facts presence works with."""
-    # `<@!ID>` is the legacy nickname form Discord no longer sends, so this
-    # strips nothing in practice. #4 fixes it to `<@ID>`.
-    text = message.content.replace(f'<@!{bot.user.id}>', '').strip()
+    # Both encodings: `<@ID>` is what Discord sends, `<@!ID>` the legacy
+    # nickname form that older messages still carry. A space in their place,
+    # collapsed after, so a mention cannot glue two words together.
+    text = message.content
+    for mention in (f'<@{bot.user.id}>', f'<@!{bot.user.id}>'):
+        text = text.replace(mention, ' ')
+    text = ' '.join(text.split())
     return presence.IncomingMessage(
         resident_id=message.author.id,
         from_bot=message.author.bot,
@@ -58,11 +62,13 @@ async def on_message(message):
     else:
         presences[channel_id] = record
 
-    # presence.Goodbye is unreachable until #4 dismisses her, and gets its
-    # branch here when #6 has written the line.
     if isinstance(decision, presence.Reply):
         response = await completion.complete(persona.build_payload(decision.exchange))
         await message.channel.send(response)
+    elif isinstance(decision, presence.Goodbye):
+        # A fixed line, not a model call. A goodbye is worth neither the
+        # latency nor the cost.
+        await message.channel.send(persona.GOODBYE)
 
 
 bot.run(DISCORD_TOKEN)
