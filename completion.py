@@ -40,6 +40,22 @@ PAUSE = 1.0
 # a glitch now.
 PAUSE_CAP = 5.0
 
+# The sampling parameters, chosen in #6 because cadence is sensitive to them.
+#
+# `temperature` is not among them: gpt-5.6-luna is a reasoning model and
+# rejects it outright, so there is no value to pick. Recorded here rather than
+# left as an absence, so the next person to go looking for it stops here
+# instead of adding one and getting a 400 on the first Summon.
+#
+# The budget is a backstop, not the thing that keeps her brief. The prompt does
+# that. This is here because Discord refuses a message over 2000 characters
+# with an HTTP 400, which would raise inside the handler and reach the channel
+# as silence. 400 tokens is roughly 1600 characters of ordinary prose, so a
+# reply long enough to be refused is one this cuts short first. Roughly: the
+# ratio is a rule of thumb rather than a guarantee, and the guarantee would be
+# a length check in the wiring, which no reply has ever needed.
+REPLY_BUDGET = 400
+
 # Worth trying again: the far side was busy, slow or briefly broken. Everything
 # else the SDK raises is a configuration bug and fails identically the second
 # time.
@@ -97,15 +113,15 @@ async def complete(payload: list[dict[str, str]]) -> str:
 
 async def _ask(payload: list[dict[str, str]]) -> str:
     """One attempt."""
-    # gpt-5.6-luna is a reasoning model: it rejects temperature, and its
-    # reasoning tokens come out of the same budget as the reply. Effort is off
-    # so the whole budget is spent on what the Resident actually reads, and so
-    # a Summon stays as fast as the model was picked to be.
     response = await client.chat.completions.create(
         model=MODEL,
         # Plain role/content dicts, which is what the SDK's message params are.
         messages=cast(list[ChatCompletionMessageParam], payload),
-        max_completion_tokens=1024,
+        max_completion_tokens=REPLY_BUDGET,
+        # Off, so the whole budget is spent on what the Resident actually reads
+        # and a Summon stays as fast as the model was picked to be. Her replies
+        # are short and factual; there is nothing here for a reasoning pass to
+        # improve, and it would come out of the same budget as the answer.
         reasoning_effort="none",
     )
     text = response.choices[0].message.content
