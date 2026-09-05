@@ -172,4 +172,11 @@ async def on_message(message):
         await message.channel.send(persona.GOODBYE)
 
 
-janet.run(config.DISCORD_TOKEN)
+# Connecting only when this file is the process. Importing it defines the
+# handler and reaches nothing, which is what lets `tests/test_app.py` drive
+# `on_message` at all: everything above is a definition, and this is the only
+# line that does something on its own. `python app.py` is unchanged, and has to
+# be: it is the start command in both `Procfile` and `railway.json`, and #12
+# has not deployed yet.
+if __name__ == "__main__":
+    janet.run(config.DISCORD_TOKEN)
