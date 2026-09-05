@@ -571,3 +571,10 @@ def test_importing_the_wiring_configures_no_logging():
     # `app.logging` is the same module object, so this needs no second import
     # inside a helper whose whole point is that it imports one thing.
     assert imported("app.logging.getLogger().handlers") == "[]"
+
+
+def test_her_log_lines_are_named_for_the_module_not_the_entry_point():
+    # `__name__` is "app" here and "__main__" under `python app.py`, so taking
+    # the name from it would make every assertion in this section describe a
+    # logger that only exists in a test.
+    assert app.log.name == "app"

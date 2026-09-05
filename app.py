@@ -15,7 +15,12 @@ import presence
 # Named for the module, so the log says which part of her spoke. `completion`
 # reports why the model could not be reached; this reports what reached the
 # channel. The Operator reads both in one stream.
-log = logging.getLogger(__name__)
+#
+# The name is spelled out rather than taken from `__name__`, which is "app" on
+# import and "__main__" under `python app.py`. That split meant the tests
+# asserted a name production never emitted, and a Railway log filtered on
+# `app` would have found none of her lines.
+log = logging.getLogger("app")
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -222,4 +227,12 @@ if __name__ == "__main__":
         format="[{asctime}] [{levelname:<8}] {name}: {message}",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    # The OpenAI SDK's HTTP client logs every request at INFO, and a root
+    # logger at INFO turns that on. `Answered` already says the call worked and
+    # `completion` says when it did not, so this would be one redundant line
+    # per reply for as long as she runs. Both spellings: the SDK moved from
+    # `httpx` to `httpx2`, and `requirements.txt` pins no exact version.
+    for noisy in ("httpx", "httpx2"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
     janet.run(config.DISCORD_TOKEN, log_handler=None)
