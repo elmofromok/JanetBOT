@@ -1,5 +1,6 @@
 """Discord wiring. Ask presence what to do, then do it."""
 
+import logging
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -10,6 +11,11 @@ import completion
 import config
 import persona
 import presence
+
+# Named for the module, so the log says which part of her spoke. `completion`
+# reports why the model could not be reached; this reports what reached the
+# channel. The Operator reads both in one stream.
+log = logging.getLogger(__name__)
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -98,7 +104,7 @@ async def switch(interaction: discord.Interaction, state: Literal["on", "off"]) 
 async def on_ready():
     global synced
 
-    print(f'{janet.user.name} has connected to Discord!')
+    log.info("Connected to Discord as %s", janet.user)
 
     if synced:
         return
@@ -154,8 +160,26 @@ async def on_message(message):
                 # when it chose to reply, so a glitch holds her here the same
                 # way a reply would.
                 await message.channel.send(persona.glitch())
+                # The cause is already in the log, from `completion`, at the
+                # level it deserves. This says where it landed, which is the
+                # half that module cannot know.
+                log.info(
+                    "Glitched at %s in channel %s",
+                    message.author.display_name,
+                    channel_id,
+                )
                 return
             await message.channel.send(response)
+            # The only record that she answered at all. Without it a working
+            # reply and a message she never received produce identical output:
+            # nothing. Her reply is not logged, only its size: the log is the
+            # Operator's, and the channel's conversation is not his to keep.
+            log.info(
+                "Answered %s in channel %s, %d characters",
+                message.author.display_name,
+                channel_id,
+                len(response),
+            )
 
         # Read back rather than carried across the await: the model and the
         # network took time, and the channel may have moved on to another
@@ -179,4 +203,23 @@ async def on_message(message):
 # be: it is the start command in both `Procfile` and `railway.json`, and #12
 # has not deployed yet.
 if __name__ == "__main__":
-    janet.run(config.DISCORD_TOKEN)
+    # Configured here rather than at import, so importing this module still
+    # reaches nothing and `tests/test_app.py` keeps its own capture.
+    #
+    # discord.py puts a handler on its own logger inside `run` and does not
+    # stop those records reaching the root logger, so a handler on root as
+    # well would print every gateway line twice. Its setup is turned off and
+    # this configuration covers the library too, in the format it would have
+    # used: a log reads better when everything in it matches.
+    #
+    # This also replaces the `print` that used to be in `on_ready`. Logging
+    # writes to stderr, which is line buffered; stdout is block buffered when
+    # it is not a terminal, so that line never survived a redirect and would
+    # never have reached Railway's log tail at all.
+    logging.basicConfig(
+        level=logging.INFO,
+        style="{",
+        format="[{asctime}] [{levelname:<8}] {name}: {message}",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    janet.run(config.DISCORD_TOKEN, log_handler=None)

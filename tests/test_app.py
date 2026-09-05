@@ -23,6 +23,7 @@ cost money and a network.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import subprocess
 import sys
@@ -514,3 +515,59 @@ def test_importing_the_wiring_connects_to_nothing():
 
 def test_she_starts_answering_so_a_restart_brings_her_back_on():
     assert imported("app.answering") == "True"
+
+
+# --- What reaches the log ---------------------------------------------
+
+def test_a_reply_says_so_in_the_log(channel, model, caplog):
+    # The Operator's only sign that she answered. Without it a working reply
+    # and a message she never received look the same from outside the channel,
+    # because both of them log nothing.
+    model()
+
+    with caplog.at_level(logging.INFO, logger="app"):
+        hear(Message(ALICE, "janet, are you a girl?", channel))
+
+    logged = [record for record in caplog.records if record.name == "app"]
+    assert len(logged) == 1
+    assert "Alice" in logged[0].getMessage()
+    assert str(CHANNEL) in logged[0].getMessage()
+
+
+def test_what_she_said_stays_out_of_the_log(channel, model, caplog):
+    # The log is the Operator's, and the channel's conversation is not his to
+    # keep. The size of a reply is all it takes to tell one from silence.
+    model()
+
+    with caplog.at_level(logging.INFO, logger="app"):
+        hear(Message(ALICE, "janet, are you a girl?", channel))
+
+    assert REPLY not in caplog.text
+    assert str(len(REPLY)) in caplog.text
+
+
+def test_a_glitch_says_so_in_the_log(channel, model, caplog):
+    # Why she glitched is `completion`'s to report. Where it landed is this
+    # module's, and it is the half that tells the Operator which channel just
+    # watched her fail.
+    model(completion.Unavailable())
+
+    with caplog.at_level(logging.INFO, logger="app"):
+        hear(Message(ALICE, "janet, are you a girl?", channel))
+
+    logged = [record for record in caplog.records if record.name == "app"]
+    assert len(logged) == 1
+    assert "Glitched" in logged[0].getMessage()
+    assert str(CHANNEL) in logged[0].getMessage()
+    # Not the line itself: which one she used is `persona`'s business and the
+    # channel already saw it.
+    assert not any(line in caplog.text for line in persona.GLITCHES)
+
+
+def test_importing_the_wiring_configures_no_logging():
+    # `basicConfig` lives under `__main__` on purpose. Called at import it
+    # would put a handler on the root logger of anything that imports her,
+    # this suite included.
+    # `app.logging` is the same module object, so this needs no second import
+    # inside a helper whose whole point is that it imports one thing.
+    assert imported("app.logging.getLogger().handlers") == "[]"
