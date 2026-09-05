@@ -26,6 +26,12 @@ import completion  # noqa: E402
 
 PAYLOAD = [{"role": "user", "content": "chad: janet, what's the capital of Peru?"}]
 
+# What Discord refuses with an HTTP 400, in characters.
+DISCORD_MESSAGE_LIMIT = 2000
+
+# The rule of thumb `REPLY_BUDGET` was chosen against, in characters per token.
+CHARACTERS_PER_TOKEN = 4
+
 
 def rate_limited(retry_after: str | None = None) -> openai.RateLimitError:
     headers = {} if retry_after is None else {"retry-after": retry_after}
@@ -190,6 +196,14 @@ def test_the_sdk_does_not_retry_underneath_us():
     # Left at its default of two, the SDK would make "one quiet retry" three
     # attempts on a schedule nobody chose.
     assert completion.client.max_retries == 0
+
+
+def test_the_reply_budget_cannot_ask_for_a_message_discord_would_refuse():
+    # The reasoning behind the number is written down in `completion`. This is
+    # what keeps it true. Raising it back to something roomy is a one-line
+    # change with a consequence nobody would connect to it: the send raises
+    # inside the handler and the channel sees silence rather than an answer.
+    assert completion.REPLY_BUDGET * CHARACTERS_PER_TOKEN <= DISCORD_MESSAGE_LIMIT
 
 
 def test_a_retry_after_is_honoured():
