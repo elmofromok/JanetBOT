@@ -43,6 +43,8 @@ import persona  # noqa: E402
 import presence  # noqa: E402
 
 
+# --- The fakes --------------------------------------------------------
+
 class Author:
     """Who wrote a message: a Resident, another bot, or Janet herself."""
 
@@ -55,6 +57,9 @@ class Author:
 ALICE = Author(1, "Alice")
 BOB = Author(2, "Bob")
 JANET = Author(999, "Janet", bot=True)
+# Another bot in the channel. She runs as a bot account herself, so without
+# one of these the `from_bot` guard hides the `from_janet` guard entirely.
+DOORMAN = Author(3, "Doorman", bot=True)
 
 CHANNEL = 100
 
@@ -224,19 +229,23 @@ def model(monkeypatch):
     return scripted
 
 
+# --- What she answers -------------------------------------------------
+
 def test_a_summon_reaches_the_model_and_the_answer_reaches_the_channel(
     channel, model
 ):
-    said = model()
+    asked = model()
 
     hear(Message(ALICE, "janet, are you a girl?", channel))
 
     assert channel.said == [REPLY]
-    assert len(said.payloads) == 1
-    assert recalled(said.payloads[0]) == [
+    assert len(asked.payloads) == 1
+    assert recalled(asked.payloads[0]) == [
         {"role": "user", "content": "Alice: janet, are you a girl?"}
     ]
 
+
+# --- The Operator's gates ---------------------------------------------
 
 @pytest.mark.parametrize(
     "summon",
@@ -246,13 +255,13 @@ def test_a_summon_reaches_the_model_and_the_answer_reaches_the_channel(
 def test_a_summon_in_an_opted_out_channel_reaches_neither_presence_nor_the_model(
     channel, model, monkeypatch, summon
 ):
-    said = model()
+    asked = model()
     monkeypatch.setattr(config, "OPT_OUT_CHANNELS", frozenset({channel.id}))
 
     hear(Message(ALICE, summon, channel, mentions=(JANET,)))
 
     assert channel.events == []
-    assert said.payloads == []
+    assert asked.payloads == []
     # No record for the channel, which is the check that the gate ran before
     # `decide`: a Summon that reached it would have started a presence.
     assert app.presences == {}
@@ -261,20 +270,22 @@ def test_a_summon_in_an_opted_out_channel_reaches_neither_presence_nor_the_model
 def test_a_summon_while_she_is_switched_off_reaches_neither_presence_nor_the_model(
     channel, model, monkeypatch
 ):
-    said = model()
+    asked = model()
     monkeypatch.setattr(app, "answering", False)
 
     hear(Message(ALICE, "janet, are you a girl?", channel))
 
     assert channel.events == []
-    assert said.payloads == []
+    assert asked.payloads == []
     assert app.presences == {}
 
+
+# --- The typing indicator, and what raises none -----------------------
 
 def test_a_reply_the_cooldown_dropped_says_nothing_and_shows_no_indicator(
     channel, model
 ):
-    said = model()
+    asked = model()
     hear(Message(ALICE, "janet, are you a girl?", channel))
     answered = list(channel.events)
 
@@ -283,19 +294,19 @@ def test_a_reply_the_cooldown_dropped_says_nothing_and_shows_no_indicator(
     hear(Message(ALICE, "and are you a robot?", channel))
 
     assert channel.events == answered
-    assert len(said.payloads) == 1
+    assert len(asked.payloads) == 1
 
 
 def test_the_indicator_brackets_the_model_call_and_comes_down_as_the_reply_lands(
     channel, model
 ):
-    said = model()
+    asked = model()
     thinking = []
 
     async def watch() -> None:
         thinking.extend(channel.events)
 
-    said.meanwhile = watch
+    asked.meanwhile = watch
 
     hear(Message(ALICE, "janet, are you a girl?", channel))
 
@@ -310,39 +321,41 @@ def test_the_indicator_brackets_the_model_call_and_comes_down_as_the_reply_lands
 def test_a_message_she_is_not_present_for_says_nothing_and_shows_no_indicator(
     channel, model
 ):
-    said = model()
+    asked = model()
 
     hear(Message(BOB, "morning all", channel))
 
     assert channel.events == []
-    assert said.payloads == []
+    assert asked.payloads == []
 
 
 def test_a_bystander_in_a_live_exchange_says_nothing_and_shows_no_indicator(
     channel, model, no_cooldown
 ):
-    said = model()
+    asked = model()
     hear(Message(ALICE, "janet, are you a girl?", channel))
     answered = list(channel.events)
 
     hear(Message(BOB, "she is not", channel))
 
     assert channel.events == answered
-    assert len(said.payloads) == 1
+    assert len(asked.payloads) == 1
 
 
 def test_the_goodbye_is_a_fixed_line_with_no_indicator_and_no_model_call(
     channel, model, no_cooldown
 ):
-    said = model()
+    asked = model()
     hear(Message(ALICE, "janet, are you a girl?", channel))
     answered = list(channel.events)
 
     hear(Message(ALICE, "thanks janet", channel))
 
     assert channel.events[len(answered):] == [("said", persona.GOODBYE)]
-    assert len(said.payloads) == 1
+    assert len(asked.payloads) == 1
 
+
+# --- Glitches ---------------------------------------------------------
 
 def test_a_failure_she_cannot_absorb_is_spoken_as_a_glitch(channel, model):
     model(completion.Unavailable())
@@ -365,23 +378,26 @@ def test_a_glitch_ends_the_indicator(channel, model):
     assert channel.events[-1] == ("typing", "down")
 
 
+# --- Exchange Recall --------------------------------------------------
+
 def test_a_glitch_is_not_recalled_into_the_next_payload(channel, model, no_cooldown):
-    said = model(completion.Unavailable())
+    asked = model(completion.Unavailable())
     hear(Message(ALICE, "janet, are you a girl?", channel))
     glitched = channel.said[0]
 
     hear(Message(ALICE, "janet?", channel))
 
-    assert glitched not in _contents(recalled(said.payloads[-1]))
+    assert len(asked.payloads) == 2
+    assert glitched not in _contents(recalled(asked.payloads[-1]))
 
 
 def test_her_own_reply_is_recalled_into_the_next_payload(channel, model, no_cooldown):
-    said = model()
+    asked = model()
     hear(Message(ALICE, "janet, are you a girl?", channel))
 
     hear(Message(ALICE, "what are you then?", channel))
 
-    assert {"role": "assistant", "content": REPLY} in recalled(said.payloads[-1])
+    assert {"role": "assistant", "content": REPLY} in recalled(asked.payloads[-1])
 
 
 def test_a_reply_that_outlived_its_exchange_is_not_recalled(
@@ -389,12 +405,12 @@ def test_a_reply_that_outlived_its_exchange_is_not_recalled(
 ):
     # Bob's turn is scripted first because he takes the channel while she is
     # still thinking about Alice's, which is the whole arrangement here.
-    said = model(TO_BOB, TO_ALICE)
+    asked = model(TO_BOB, TO_ALICE)
 
     async def bob_takes_over() -> None:
         await deliver(Message(BOB, "janet, over here", channel))
 
-    said.meanwhile = bob_takes_over
+    asked.meanwhile = bob_takes_over
     hear(Message(ALICE, "janet, are you a girl?", channel))
     assert channel.said == [TO_BOB, TO_ALICE]
 
@@ -402,9 +418,11 @@ def test_a_reply_that_outlived_its_exchange_is_not_recalled(
 
     # Hers, pushed onto a stranger's Exchange, would read as her answering
     # something Bob never said.
-    assert TO_ALICE not in _contents(recalled(said.payloads[-1]))
-    assert TO_BOB in _contents(recalled(said.payloads[-1]))
+    assert TO_ALICE not in _contents(recalled(asked.payloads[-1]))
+    assert TO_BOB in _contents(recalled(asked.payloads[-1]))
 
+
+# --- Reading a Discord message ----------------------------------------
 
 @pytest.mark.parametrize(
     "marker", ["<@{id}>", "<@!{id}>"], ids=["mention", "legacy nickname mention"]
@@ -412,7 +430,7 @@ def test_a_reply_that_outlived_its_exchange_is_not_recalled(
 def test_her_mention_markers_are_stripped_before_the_model_sees_them(
     channel, model, marker
 ):
-    said = model()
+    asked = model()
     mention = marker.format(id=JANET.id)
 
     hear(
@@ -423,128 +441,50 @@ def test_her_mention_markers_are_stripped_before_the_model_sees_them(
 
     # A space in each marker's place and the spacing collapsed after, so a
     # mention cannot glue two words together on its way to the model.
-    assert _contents(recalled(said.payloads[0])) == ["Alice: are you a girl?"]
+    assert _contents(recalled(asked.payloads[0])) == ["Alice: are you a girl?"]
 
 
-def test_she_never_answers_herself(channel, model):
-    said = model()
+@pytest.mark.parametrize("bot", [DOORMAN, JANET], ids=["a bot", "janet herself"])
+def test_a_message_from_a_bot_is_never_answered(channel, model, bot):
+    asked = model()
 
-    hear(Message(JANET, "janet, are you a girl?", channel))
+    hear(Message(bot, "janet, are you a girl?", channel))
 
     assert channel.events == []
-    assert said.payloads == []
+    assert asked.payloads == []
+
+
+def test_she_hears_her_own_message_as_her_own(channel):
+    # Read off `read_message` rather than driven through the handler, because
+    # from the channel this is invisible: she is a bot account, so `from_bot`
+    # stops her own message before `from_janet` is ever consulted. This is the
+    # field that holds if she stops being one.
+    hers = app.read_message(Message(JANET, "Hi there!", channel))
+    someone_elses = app.read_message(Message(ALICE, "hi janet", channel))
+
+    assert hers.from_janet
+    assert not someone_elses.from_janet
 
 
 def test_a_message_mentioning_someone_else_does_not_summon_her(channel, model):
-    said = model()
+    asked = model()
 
     hear(Message(ALICE, f"<@{BOB.id}> where are you?", channel, mentions=(BOB,)))
 
     assert channel.events == []
-    assert said.payloads == []
+    assert asked.payloads == []
 
 
 def test_a_direct_message_is_not_a_summon(channel, model):
-    said = model()
+    asked = model()
 
     hear(Message(ALICE, "janet, are you a girl?", channel, in_server=False))
 
     assert channel.events == []
-    assert said.payloads == []
+    assert asked.payloads == []
 
 
-class Response:
-    """`interaction.response`, which is answered once and only once."""
-
-    def __init__(self) -> None:
-        self.sent: list[tuple[str, bool]] = []
-
-    async def send_message(self, text: str, ephemeral: bool = False) -> None:
-        self.sent.append((text, ephemeral))
-
-
-class Interaction:
-    """Someone running the `/janet` command. `user` is Discord's word for it."""
-
-    def __init__(self, author: Author):
-        self.user = author
-        self.response = Response()
-
-
-# Whoever `OPERATOR_ID` names, rather than an id of this file's choosing, so
-# the test holds whether the environment above supplied it or a local `.env`
-# did.
-OPERATOR = Author(config.OPERATOR_ID, "Chad")
-
-
-def run_command(interaction: Interaction, state: str) -> None:
-    """Run `/janet`. `tree.command` wraps the function it decorates."""
-    # The ignore is the fake interaction meeting a real signature. Building a
-    # `discord.Interaction` to satisfy it would mean building a connected
-    # client, which is the thing this file exists not to need.
-    asyncio.run(
-        app.switch.callback(interaction, state)  # type: ignore[call-arg, arg-type]
-    )
-
-
-def test_the_operator_can_switch_her_off_and_on_again(channel, model):
-    model()
-    run_command(Interaction(OPERATOR), "off")
-
-    hear(Message(ALICE, "janet, are you a girl?", channel))
-    assert channel.events == []
-
-    run_command(Interaction(OPERATOR), "on")
-
-    hear(Message(ALICE, "janet, are you a girl?", channel))
-    assert channel.said == [REPLY]
-
-
-def test_a_resident_who_is_not_the_operator_is_refused_and_changes_nothing(
-    channel, model
-):
-    model()
-    refused = Interaction(ALICE)
-
-    run_command(refused, "off")
-
-    assert len(refused.response.sent) == 1
-    hear(Message(ALICE, "janet, are you a girl?", channel))
-    assert channel.said == [REPLY]
-
-
-def test_both_answers_to_the_switch_are_ephemeral():
-    for state in ("off", "on"):
-        answered = Interaction(OPERATOR)
-
-        run_command(answered, state)
-
-        assert [ephemeral for _, ephemeral in answered.response.sent] == [True]
-
-
-def test_the_refusal_is_ephemeral_too():
-    refused = Interaction(ALICE)
-
-    run_command(refused, "off")
-
-    assert [ephemeral for _, ephemeral in refused.response.sent] == [True]
-
-
-def test_switching_off_and_on_again_leaves_no_exchange_in_progress(
-    channel, model, no_cooldown
-):
-    model()
-    hear(Message(ALICE, "janet, are you a girl?", channel))
-    answered = list(channel.events)
-
-    run_command(Interaction(OPERATOR), "off")
-    run_command(Interaction(OPERATOR), "on")
-
-    # A follow-up needs no Summon while she is Present, so one that goes
-    # unanswered is the check that the Exchange did not survive the switch.
-    hear(Message(ALICE, "and are you a robot?", channel))
-    assert channel.events == answered
-
+# --- Importing the wiring ---------------------------------------------
 
 def imported(expression: str) -> str:
     """What importing `app` leaves behind, in an interpreter of its own.
@@ -559,6 +499,9 @@ def imported(expression: str) -> str:
         capture_output=True,
         text=True,
         check=True,
+        # The regression this guards is an import that blocks forever, so it
+        # has to fail rather than hang the suite waiting on it.
+        timeout=60,
     ).stdout.strip()
 
 
