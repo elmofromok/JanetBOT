@@ -58,13 +58,22 @@ REPLY_BUDGET = 400
 
 # Worth trying again: the far side was busy, slow or briefly broken. Everything
 # else the SDK raises is a configuration bug and fails identically the second
-# time.
+# time. One member of this tuple lies, which is what `_exhausted` is for.
 TRANSIENT = (
     openai.RateLimitError,
     openai.APITimeoutError,
     openai.APIConnectionError,
     openai.InternalServerError,
 )
+
+# An account with no credit on it answers with an HTTP 429, the same status as
+# a real rate limit, so the SDK raises `RateLimitError` for both. They could
+# not be less alike: one clears by itself in a second, the other clears when
+# somebody pays. Treated as transient it costs a second of a live conversation
+# and then reports "could not reach the model, twice", which sends the Operator
+# to OpenAI's status page when the answer is his own balance. It cost exactly
+# that on the first day she was live.
+EXHAUSTED = frozenset({"insufficient_quota", "credit_balance_exhausted"})
 
 
 class Unavailable(Exception):
@@ -88,6 +97,8 @@ async def complete(payload: list[dict[str, str]]) -> str:
     try:
         return await _ask(payload)
     except TRANSIENT as failure:
+        if _exhausted(failure):
+            raise _no_credit(failure) from failure
         pause = _pause_after(failure)
     except openai.OpenAIError as failure:
         # An authentication failure, an unknown model, a malformed request. No
@@ -102,6 +113,11 @@ async def complete(payload: list[dict[str, str]]) -> str:
     try:
         return await _ask(payload)
     except TRANSIENT as failure:
+        # Checked again rather than only on the first attempt: a balance can
+        # empty between the two, and the second failure is the one that gets
+        # reported.
+        if _exhausted(failure):
+            raise _no_credit(failure) from failure
         # Warning rather than error: nothing is misconfigured, the far side was
         # busy twice running.
         log.warning("Janet could not reach the model, twice: %s", failure)
@@ -109,6 +125,28 @@ async def complete(payload: list[dict[str, str]]) -> str:
     except openai.OpenAIError as failure:
         log.error("Janet cannot use the model as configured", exc_info=failure)
         raise Unavailable from failure
+
+
+def _exhausted(failure: Exception) -> bool:
+    """Whether a 429 is an empty balance rather than a busy far side."""
+    # Both fields, because OpenAI has moved this between them: the body that
+    # stopped Janet carried type `insufficient_quota` and code
+    # `credit_balance_exhausted`. Matching either survives it moving again.
+    return bool(
+        EXHAUSTED
+        & {getattr(failure, "type", None), getattr(failure, "code", None)}
+    )
+
+
+def _no_credit(failure: Exception) -> Unavailable:
+    """Report an empty balance, and hand back the failure to raise.
+
+    Error level, alongside a bad key and an unknown model: it is the
+    Operator's to fix and Janet cannot absorb it. The SDK's message carries
+    the billing URL, which is the whole of what he needs.
+    """
+    log.error("Janet cannot use the model: no credit remaining. %s", failure)
+    return Unavailable()
 
 
 async def _ask(payload: list[dict[str, str]]) -> str:

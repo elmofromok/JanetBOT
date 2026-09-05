@@ -44,6 +44,35 @@ def rate_limited(retry_after: str | None = None) -> openai.RateLimitError:
     )
 
 
+def out_of_credit() -> openai.RateLimitError:
+    """An empty balance, which OpenAI reports as a 429 like any rate limit.
+
+    The body is the one that actually stopped Janet on the day she went live,
+    down to the fields: `type` and `code` disagree, and either has to be
+    enough.
+    """
+    body = {
+        "message": (
+            "You have no credits remaining. Add credits to continue using the "
+            "API at https://platform.openai.com/settings/organization/billing/."
+        ),
+        "type": "insufficient_quota",
+        "param": None,
+        "code": "credit_balance_exhausted",
+    }
+    return openai.RateLimitError(
+        body["message"],
+        response=httpx.Response(
+            429,
+            # A `Retry-After` it would otherwise have honoured, so the test
+            # fails if the retry comes back.
+            headers={"retry-after": "3"},
+            request=httpx.Request("POST", "https://api.test"),
+        ),
+        body=body,
+    )
+
+
 def timed_out() -> openai.APITimeoutError:
     return openai.APITimeoutError(request=httpx.Request("POST", "https://api.test"))
 
@@ -233,3 +262,57 @@ def test_a_failure_carrying_no_response_falls_back_to_the_fixed_pause():
     # A timeout and a dropped connection never got a response to read a header
     # off.
     assert completion._pause_after(timed_out()) == completion.PAUSE
+
+
+# --- An empty balance is not a rate limit -----------------------------
+
+def test_an_empty_balance_is_attempted_once(monkeypatch, instant):
+    # The reply is scripted second and must never be reached: getting to it
+    # would mean she retried a failure that clears only when somebody pays.
+    client = Scripted(out_of_credit(), "Lima!")
+    monkeypatch.setattr(completion, "client", client)
+    with pytest.raises(completion.Unavailable):
+        asyncio.run(completion.complete(PAYLOAD))
+    assert client.attempts == 1
+
+
+def test_an_empty_balance_is_the_operator_s_to_fix(monkeypatch, instant, caplog):
+    monkeypatch.setattr(completion, "client", Scripted(out_of_credit()))
+    with caplog.at_level(logging.DEBUG, logger="completion"):
+        with pytest.raises(completion.Unavailable):
+            asyncio.run(completion.complete(PAYLOAD))
+
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1
+    assert "credit" in errors[0].getMessage()
+    # The billing URL is the whole of what he needs, and it is in the message
+    # the SDK already carries.
+    assert "billing" in errors[0].getMessage()
+    # The line this replaced. It sent the Operator to look at OpenAI when what
+    # was wrong was his own account.
+    assert "twice" not in caplog.text
+
+
+def test_an_empty_balance_after_a_rate_limit_is_still_reported_as_credit(
+    monkeypatch, instant, caplog
+):
+    # Why `_exhausted` is checked on both attempts rather than only the first.
+    monkeypatch.setattr(
+        completion, "client", Scripted(rate_limited(), out_of_credit())
+    )
+    with caplog.at_level(logging.DEBUG, logger="completion"):
+        with pytest.raises(completion.Unavailable):
+            asyncio.run(completion.complete(PAYLOAD))
+
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1
+    assert "credit" in errors[0].getMessage()
+    assert "twice" not in caplog.text
+
+
+def test_a_real_rate_limit_is_still_retried(ask):
+    # The other half of the claim: telling the two apart has to leave an
+    # ordinary 429 alone, which is the case the retry exists for.
+    client, reply = ask(rate_limited(), "Lima!")
+    assert reply == "Lima!"
+    assert client.attempts == 2
