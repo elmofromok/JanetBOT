@@ -66,6 +66,12 @@ _Avoid_: generate, create, render, make
 The thing a Materialise produces.
 _Avoid_: image, asset, attachment, output
 
+**Glitch**:
+What Janet says when she cannot answer at all. She is allowed to be broken and
+never allowed to appear to have answered, so a failure speaks rather than
+going quiet (ADR 0002). In her voice, and never part of Exchange Recall.
+_Avoid_: error, error message, fallback, apology
+
 ## What she knows
 
 Three distinct things, deliberately not called "memory".

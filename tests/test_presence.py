@@ -11,8 +11,10 @@ the module. A test derived from the implementation agrees with its bugs.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -424,9 +426,27 @@ def test_presence_is_held_per_channel():
 
 
 def test_deciding_reaches_no_further_than_the_standard_library():
-    """The reason these tests need no Discord client and no API key."""
-    assert "discord" not in sys.modules
-    assert "openai" not in sys.modules
+    """The reason these tests need no Discord client and no API key.
+
+    In a subprocess, because the claim is about what importing `presence`
+    pulls in and `sys.modules` here holds whatever every other test module
+    imported. `tests/test_completion.py` imports the SDK, legitimately, and
+    reading this process would make the check pass or fail on collection order.
+    """
+    ROOT = Path(__file__).parent.parent
+    loaded = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import presence, sys;"
+            " print('discord' in sys.modules, 'openai' in sys.modules)",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert loaded == ["False", "False"]
 
 
 # --- Exchange Recall ---------------------------------------------------

@@ -133,8 +133,30 @@ async def on_message(message):
     hold(channel_id, record)
 
     if isinstance(decision, presence.Reply):
-        response = await completion.complete(persona.build_payload(decision.exchange))
-        await message.channel.send(response)
+        # The indicator goes up only here, after presence has decided she is
+        # answering. A message the cooldown dropped never reaches this branch,
+        # so the channel never sees her start to answer and then say nothing.
+        # The context manager rather than a manual trigger, so a crash releases
+        # it: a stuck indicator is worse than none. It stays up across the
+        # retry inside `complete`, which is the longest wait there is, and
+        # comes down as the message lands.
+        async with message.channel.typing():
+            try:
+                response = await completion.complete(
+                    persona.build_payload(decision.exchange)
+                )
+            except completion.Unavailable:
+                # She is allowed to be broken. She is never allowed to appear
+                # to have answered, so a failure speaks rather than going
+                # quiet (ADR 0002). Not recalled: feeding "I glitched" back as
+                # context is noise that compounds across an Exchange. Presence
+                # is already extended, because `decide` moved the idle timer
+                # when it chose to reply, so a glitch holds her here the same
+                # way a reply would.
+                await message.channel.send(persona.glitch())
+                return
+            await message.channel.send(response)
+
         # Read back rather than carried across the await: the model and the
         # network took time, and the channel may have moved on to another
         # Exchange while she was thinking. Anything said in the meantime is
@@ -145,7 +167,8 @@ async def on_message(message):
         ))
     elif isinstance(decision, presence.Goodbye):
         # A fixed line, not a model call. A goodbye is worth neither the
-        # latency nor the cost.
+        # latency nor the cost, and with no latency behind it there is nothing
+        # for a typing indicator to explain.
         await message.channel.send(persona.GOODBYE)
 
 
